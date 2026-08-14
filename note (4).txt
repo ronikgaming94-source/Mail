@@ -1,0 +1,1477 @@
+BUILD A COMPLETE PRODUCTION-READY TELEGRAM TEMP MAIL BOT USING THE REAL MAIL.TM API.
+
+DO NOT BUILD A DEMO.
+DO NOT USE MOCK EMAILS.
+DO NOT FAKE API RESPONSES.
+DO NOT CREATE PLACEHOLDER FEATURES.
+
+The bot must actually create real Mail.tm temporary email accounts, receive real incoming emails, automatically notify users on Telegram, manage credits, referrals, daily bonuses, force subscription, maintenance mode, and provide a powerful admin panel.
+
+IMPORTANT:
+Use the current Mail.tm API architecture documented at:
+https://docs.mail.tm/
+
+==================================================
+TECH STACK
+
+Use:
+
+- Python 3.11+
+- Aiogram 3.x
+- PostgreSQL
+- SQLAlchemy 2.x Async ORM
+- asyncpg
+- aiohttp or httpx for Mail.tm API requests
+- FastAPI
+- Uvicorn
+- asyncio
+- python-dotenv
+
+Do NOT use:
+
+- SQLite
+- Replit DB
+- Pyrogram
+- API_ID
+- API_HASH
+- fake/mock email services
+
+The Telegram bot and Mail.tm integration must be fully asynchronous.
+
+==================================================
+MAIL.TM API — MANDATORY IMPLEMENTATION
+
+Use the official Mail.tm API.
+
+Base API:
+
+https://api.mail.tm
+
+No Mail.tm API key is required.
+
+The implementation must follow this sequence:
+
+STEP 1:
+GET /domains
+
+Retrieve active Mail.tm domains.
+
+Only use domains where isActive=true.
+
+Do NOT hardcode a Mail.tm domain.
+
+Cache the available domain list for a reasonable period so the bot does not repeatedly request /domains.
+
+STEP 2:
+POST /accounts
+
+Create a real Mail.tm account.
+
+Request:
+
+{
+"address": "randomusername@domain",
+"password": "secure_random_password"
+}
+
+Generate cryptographically random mailbox usernames.
+
+Do not generate predictable usernames.
+
+STEP 3:
+POST /token
+
+Request:
+
+{
+"address": "mailbox_address",
+"password": "mailbox_password"
+}
+
+Store the returned Mail.tm account ID and token securely in PostgreSQL.
+
+STEP 4:
+Use:
+
+Authorization: Bearer TOKEN
+
+for authenticated Mail.tm requests.
+
+==================================================
+MAILBOX CREATION BUSINESS LOGIC
+
+USER CLICKS:
+
+📧 Create New Mail
+
+Before creating:
+
+1. Check user exists.
+2. Check user is not banned.
+3. Check maintenance mode.
+4. Check force subscription.
+5. Check user has at least 1 credit.
+6. Check Mail.tm API availability.
+7. Retrieve a valid active domain if needed.
+
+Then create the Mail.tm account.
+
+CRITICAL CREDIT RULE:
+
+1 successful Mail.tm account = 1 credit.
+
+DO NOT deduct credit before successful creation.
+
+Correct sequence:
+
+START TRANSACTION
+
+Lock user credit row.
+
+Check balance >= 1.
+
+Call Mail.tm account creation.
+
+Call Mail.tm token creation.
+
+Verify successful account/token.
+
+Create local Mailbox database record.
+
+Deduct exactly 1 credit.
+
+Create CreditTransaction.
+
+COMMIT.
+
+If ANY Mail.tm operation fails:
+
+ROLLBACK.
+
+DO NOT deduct the credit.
+
+DO NOT create a broken local mailbox.
+
+This must be race-condition safe.
+
+If user presses Create New Mail multiple times rapidly, only valid successful mailbox creations should consume credits.
+
+==================================================
+MAILBOX INFORMATION
+
+After successful creation:
+
+📧 NEW MAIL CREATED
+
+Email:
+"example@domain.com"
+
+💳 Balance:
+9 Credits
+
+Buttons:
+
+🔄 Refresh
+🗑️ Delete Mail
+🏠 Main Menu
+
+DO NOT show an Inbox button.
+
+DO NOT create fake inbox functionality.
+
+==================================================
+MULTIPLE MAILBOXES
+
+Users may create multiple Mail.tm accounts if they have enough credits.
+
+Store every mailbox separately.
+
+Example:
+
+📧 My Mailboxes
+
+1. abc123@domain.com
+2. x7k92@domain.com
+3. hello82@domain.com
+
+Buttons:
+
+📧 Mailbox 1
+📧 Mailbox 2
+📧 Mailbox 3
+🏠 Main Menu
+
+However, the primary UX must remain simple.
+
+Incoming emails must identify exactly which mailbox received them.
+
+==================================================
+INCOMING EMAILS — REAL-TIME
+
+THIS IS A CRITICAL REQUIREMENT.
+
+Do NOT make users manually open Inbox.
+
+Use Mail.tm's real-time event system.
+
+Mail.tm provides Mercure Server-Sent Events.
+
+Mercure hub:
+
+https://mercure.mail.tm/.well-known/mercure
+
+Topic:
+
+/accounts/{account_id}
+
+Authenticate using:
+
+Authorization: Bearer MAILBOX_TOKEN
+
+For every active Mail.tm mailbox, maintain a real-time listener.
+
+When a new account event indicates new mail:
+
+1. Identify the mailbox/account.
+2. Find the corresponding local user.
+3. Fetch the actual message using:
+
+GET /messages/{message_id}
+
+or the appropriate Mail.tm message endpoint.
+
+4. Parse sender.
+5. Parse recipient.
+6. Parse subject.
+7. Parse text.
+8. Safely sanitize HTML.
+9. Save the message in PostgreSQL.
+10. Prevent duplicate processing.
+11. Send Telegram notification immediately.
+
+Do NOT depend on users pressing Refresh.
+
+==================================================
+REAL-TIME LISTENER ARCHITECTURE
+
+Create a dedicated background service:
+
+MailEventManager
+
+Responsibilities:
+
+- Start listener for every active mailbox.
+- Maintain SSE/Mercure connections.
+- Reconnect automatically after disconnect.
+- Handle expired/invalid tokens gracefully.
+- Refresh/re-authenticate mailbox token when necessary.
+- Backoff after repeated failures.
+- Stop listeners when mailbox is deleted.
+- Start listeners for existing mailboxes after bot restart.
+
+Do NOT create one uncontrolled infinite task per request.
+
+Track active listeners centrally.
+
+Use asyncio tasks safely.
+
+When the application restarts:
+
+1. Load all active mailboxes from PostgreSQL.
+2. Validate their status.
+3. Start their real-time listeners again.
+
+==================================================
+TELEGRAM NEW EMAIL NOTIFICATION
+
+When a new email arrives:
+
+Send:
+
+📩 NEW EMAIL RECEIVED
+
+📧 To:
+"abc123@domain.com"
+
+👤 From:
+"sender@example.com"
+
+📝 Subject:
+"Your Verification Code"
+
+━━━━━━━━━━━━━━
+
+Message preview here...
+
+Buttons:
+
+📖 View Full Email
+🗑️ Delete Email
+🏠 Main Menu
+
+The notification must be sent automatically.
+
+The user must NOT need to open Inbox.
+
+==================================================
+FULL EMAIL VIEW
+
+When user clicks:
+
+📖 View Full Email
+
+Fetch the stored/safe message.
+
+Display:
+
+📩 EMAIL
+
+From:
+sender@example.com
+
+To:
+abc123@domain.com
+
+Subject:
+Your Verification Code
+
+Date:
+14 Aug 2026
+
+━━━━━━━━━━━━━━
+
+Email content
+
+Buttons:
+
+🗑️ Delete Email
+🔙 Back
+
+Handle Telegram message length limits.
+
+If message is too long:
+
+Show a safe truncated version and provide pagination/chunking.
+
+Do not crash because an email exceeds Telegram limits.
+
+==================================================
+EMAIL SECURITY
+
+Treat all incoming email content as untrusted.
+
+Do not blindly render HTML.
+
+Sanitize:
+
+- HTML
+- Markdown
+- Telegram formatting
+- scripts
+- malicious markup
+
+Prevent Telegram formatting injection.
+
+Plain text should be the default display.
+
+If HTML is displayed, sanitize it first.
+
+==================================================
+EMAIL ATTACHMENTS
+
+Store attachment metadata.
+
+Do not automatically download arbitrary large attachments.
+
+Apply configurable size limits.
+
+Show:
+
+📎 Attachment:
+filename.ext
+
+Only download when explicitly requested.
+
+Never execute attachments.
+
+Never run executable files.
+
+==================================================
+MESSAGE DUPLICATE PROTECTION
+
+Mail.tm events can potentially be retried/reconnected.
+
+Use:
+
+provider_message_id / Mail.tm message ID
+
+as a unique identifier.
+
+Before processing:
+
+Check whether message already exists.
+
+If already processed:
+
+DO NOT send another Telegram notification.
+
+Database must have a unique constraint for provider message ID.
+
+==================================================
+MAILBOX DELETION
+
+User button:
+
+🗑️ Delete Mail
+
+Confirmation:
+
+⚠️ DELETE MAILBOX?
+
+Email:
+abc123@domain.com
+
+Deleting this mailbox may prevent future messages from being received.
+
+Buttons:
+
+✅ Confirm Delete
+❌ Cancel
+
+On confirmation:
+
+1. Delete Mail.tm account using DELETE /accounts/{id}.
+2. Mark local mailbox deleted.
+3. Stop its SSE listener.
+4. Keep transaction/history records where appropriate.
+
+DO NOT automatically refund the credit.
+
+==================================================
+MAIL.TM RETENTION / EXPIRY
+
+IMPORTANT:
+
+Do NOT falsely advertise Mail.tm mailboxes as permanent or guaranteed never-expiring.
+
+Mail.tm is a temporary email service and provider-side retention/availability is controlled by Mail.tm.
+
+The bot must NOT add its own arbitrary expiry timer such as:
+
+10 minutes
+1 hour
+24 hours
+7 days
+
+unless explicitly configured later by the admin.
+
+The UI/disclaimer must accurately state that mailbox availability depends on Mail.tm.
+
+==================================================
+USER CREDITS
+
+New user:
+
++10 credits
+
+Daily Bonus:
+
++10 credits
+
+Referral:
+
++5 credits
+
+Mail.tm mailbox creation:
+
+-1 credit
+
+Balance can NEVER become negative.
+
+Every credit change must create a transaction record.
+
+CreditTransaction:
+
+id
+user_id
+amount
+type
+description
+reference_id
+created_at
+admin_id nullable
+
+Types:
+
+SIGNUP_BONUS
+DAILY_BONUS
+REFERRAL_BONUS
+MAIL_CREATION
+ADMIN_ADD
+ADMIN_REMOVE
+REFUND
+
+==================================================
+DAILY BONUS
+
+Button:
+
+🎁 Daily Bonus
+
+Default reward:
+
++10 Credits
+
+Only once every 24 hours.
+
+Use server-side timestamps.
+
+Prevent:
+
+- double clicks
+- concurrent claims
+- callback replay
+- timezone abuse
+
+If already claimed:
+
+⏳ DAILY BONUS ALREADY CLAIMED
+
+Next bonus:
+XX hours XX minutes
+
+Admin must be able to change:
+
+Reward amount
+Cooldown
+Enable/disable
+
+==================================================
+REFERRAL SYSTEM
+
+Button:
+
+👥 Refer & Earn
+
+Reward:
+
+5 Credits
+
+Generate:
+
+https://t.me/BOT_USERNAME?start=USER_ID
+
+Do not hardcode bot username.
+
+Use Telegram bot username dynamically.
+
+Display:
+
+👥 REFER & EARN
+
+Invite friends and earn 5 credits for every successful referral.
+
+Your Referrals:
+5
+
+Credits Earned:
+25
+
+Your Link:
+[Referral Link]
+
+Buttons:
+
+📤 Share Link
+🔙 Back
+
+Rules:
+
+- No self-referral.
+- One referred user can have only one referrer.
+- Existing users cannot be retroactively referred.
+- Referral reward is given once only.
+- Use database unique constraints.
+- Use transaction-safe reward logic.
+
+==================================================
+MY INFO
+
+Button:
+
+👤 My Info
+
+Display:
+
+👤 MY INFORMATION
+
+🆔 User ID: 123456789
+
+💳 Current Balance:
+25 Credits
+
+👥 Total Referrals:
+5
+
+📧 Mails Created:
+10
+
+📩 Emails Received:
+24
+
+📅 Joined:
+14 Aug 2026
+
+==================================================
+MAIN MENU
+
+Use:
+
+📧 Create New Mail
+👤 My Info
+🎁 Daily Bonus
+👥 Refer & Earn
+⚠️ Disclaimer
+🆘 Help
+
+No command-based navigation.
+
+Help button:
+
+http://t.me/HelpSupportteambot
+
+Use a URL button.
+
+==================================================
+DISCLAIMER
+
+Show this on first use:
+
+⚠️ DISCLAIMER & TERMS OF USE
+
+By using this bot, you confirm that you have read, understood, and agreed to our Terms.
+
+• You are responsible for all activities performed through this bot.
+• Illegal, fraudulent, abusive, spam, phishing, or malicious use is strictly prohibited.
+• We reserve the right to restrict, suspend, or terminate any user without prior notice.
+• Credits, bonuses, referrals, limits, domains, and features may be changed, removed, or modified at any time.
+• We may update, modify, or replace these Terms and Disclaimer without prior notice.
+• Continued use of the bot after changes means you accept the updated Terms.
+• We do not guarantee uninterrupted service, permanent email availability, or successful delivery.
+
+⚠️ By using this bot, you agree to all current and future Terms, Rules, and Policies. Use the service at your own responsibility.
+
+Buttons:
+
+✅ I Agree
+❌ Decline
+
+Store agreement timestamp.
+
+==================================================
+FORCE SUBSCRIBE
+
+Admin can add multiple channels.
+
+Before normal bot usage:
+
+Check membership.
+
+Display:
+
+🔒 JOIN REQUIRED CHANNELS
+
+Join all required channels to continue.
+
+Buttons dynamically generated:
+
+📢 Channel 1
+📢 Channel 2
+📢 Channel 3
+
+Then:
+
+✅ Verify
+
+Admin controls:
+
+➕ Add Channel
+➖ Remove Channel
+📋 Channel List
+🟢 Enable/Disable
+🔍 Test Channel
+
+Handle Telegram API failures.
+
+==================================================
+MAINTENANCE MODE
+
+Global setting.
+
+When ON:
+
+🔧 BOT UNDER MAINTENANCE
+
+The bot is currently unavailable.
+Please try again later.
+
+Buttons:
+
+🆘 Support
+
+Admins bypass maintenance mode.
+
+Admin can edit maintenance message.
+
+==================================================
+ADMIN PANEL
+
+Only IDs configured in:
+
+ADMIN_IDS
+
+may access admin panel.
+
+Never trust username.
+
+Admin menu:
+
+🛠️ ADMIN PANEL
+
+Buttons:
+
+📊 Dashboard
+👥 Users
+📧 Mailboxes
+📩 Emails
+💳 Credits
+🎁 Daily Bonus
+👥 Referrals
+📢 Broadcast
+📣 Force Subscribe
+🔧 Maintenance
+⚙️ Settings
+📜 Logs
+🖼️ Media
+❤️ System Health
+
+==================================================
+ADMIN DASHBOARD
+
+Display:
+
+👥 Total Users
+🟢 Active Users
+🚫 Banned Users
+📧 Total Mailboxes
+📩 Total Emails
+👥 Total Referrals
+💳 Credits Used
+💳 Credits Issued
+🔧 Maintenance Status
+📡 Mail.tm Status
+
+Include today/all-time statistics.
+
+==================================================
+ADMIN USER MANAGEMENT
+
+Features:
+
+🔎 Search User
+👤 View User
+🚫 Ban
+✅ Unban
+➕ Add Credits
+➖ Remove Credits
+📧 View Mailboxes
+👥 View Referrals
+📜 View Transactions
+
+User detail:
+
+Telegram ID
+Username
+Name
+Balance
+Referral count
+Mail count
+Email count
+Joined
+Last active
+Ban status
+Agreement status
+
+==================================================
+ADMIN CREDIT SYSTEM
+
+Add/remove credits.
+
+Require confirmation.
+
+Example:
+
+⚠️ CONFIRM CREDIT CHANGE
+
+User:
+123456789
+
+Change:
++50 Credits
+
+Buttons:
+
+✅ Confirm
+❌ Cancel
+
+Every admin credit action must be logged.
+
+==================================================
+ADMIN REFERRAL SETTINGS
+
+Admin can change:
+
+Referral reward
+Enable/disable referrals
+
+Default:
+
+5 credits
+
+==================================================
+ADMIN DAILY BONUS SETTINGS
+
+Admin can change:
+
+Bonus reward
+Cooldown
+Enable/disable
+
+Default:
+
+10 credits
+24 hours
+
+==================================================
+ADMIN FORCE SUBSCRIBE
+
+Full CRUD.
+
+Add:
+Channel ID
+Channel username
+Invite URL
+Display name
+
+Remove channel.
+
+Enable/disable channel.
+
+Test membership.
+
+==================================================
+BROADCAST SYSTEM
+
+Admin can broadcast text/media.
+
+Support:
+
+Text
+Photo
+Video
+Document
+Caption
+Inline buttons
+
+Use background processing.
+
+Respect Telegram rate limits.
+
+Track:
+
+Total
+Sent
+Failed
+Blocked
+
+Do not freeze the bot.
+
+==================================================
+ADMIN MAILBOX MANAGEMENT
+
+Admin can:
+
+Search mailbox
+View owner
+View Mail.tm account ID
+View status
+View creation date
+View email count
+Delete mailbox
+
+Do not expose Mail.tm passwords/tokens in Telegram.
+
+==================================================
+SETTINGS
+
+Admin-configurable:
+
+Signup bonus
+Daily bonus
+Referral reward
+Credit cost
+Maintenance
+Disclaimer
+Support URL
+Force subscribe
+Mail notifications
+Attachment limits
+Rate limits
+
+DO NOT hardcode configurable business rules.
+
+==================================================
+DATABASE
+
+Use PostgreSQL.
+
+Models:
+
+User
+Mailbox
+EmailMessage
+Referral
+CreditTransaction
+DailyBonusClaim
+ForceJoinChannel
+BotSetting
+AdminAction
+Broadcast
+SystemLog
+
+User:
+
+id
+telegram_id UNIQUE
+username
+first_name
+last_name
+balance
+referrer_id
+total_referrals
+is_banned
+is_agreed
+agreement_at
+created_at
+last_active_at
+
+Mailbox:
+
+id
+user_id
+mailtm_account_id UNIQUE
+email_address UNIQUE
+mailtm_password_encrypted
+mailtm_token_encrypted
+status
+created_at
+deleted_at
+
+EmailMessage:
+
+id
+mailbox_id
+mailtm_message_id UNIQUE
+sender
+recipient
+subject
+text_content
+safe_html
+received_at
+seen
+has_attachments
+created_at
+
+Referral:
+
+id
+referrer_id
+referred_id UNIQUE
+reward
+created_at
+
+CreditTransaction:
+
+id
+user_id
+amount
+type
+description
+reference_id
+created_at
+admin_id
+
+Use proper indexes and foreign keys.
+
+==================================================
+SECURITY OF MAIL.TM CREDENTIALS
+
+Every Mail.tm account requires a password and token.
+
+Never send these to Telegram users.
+
+Do not put them in logs.
+
+Do not expose them through admin UI.
+
+Prefer encrypted storage using an application encryption key.
+
+Create:
+
+ENCRYPTION_KEY=
+
+environment variable.
+
+If encryption implementation is too complex for the first version, isolate credential storage behind a service abstraction so it can be upgraded safely.
+
+==================================================
+RATE LIMITING
+
+Mail.tm has an API rate limit.
+
+The current general Mail.tm API quota is 8 queries per second per IP.
+
+Implement a global async rate limiter for Mail.tm requests.
+
+Do not fire unlimited concurrent API requests.
+
+Add exponential backoff for 429 responses.
+
+For 429:
+
+Wait and retry safely.
+
+Do not deduct user credits on failed creation.
+
+==================================================
+MAIL.TM ERROR HANDLING
+
+Handle:
+
+400
+401
+404
+405
+422
+429
+5xx
+network timeout
+connection reset
+SSE disconnect
+
+User sees friendly messages.
+
+Never show raw API response or traceback.
+
+Example:
+
+❌ Unable to create your email right now.
+
+Please try again in a moment.
+
+==================================================
+MAIL.TM DOMAIN HANDLING
+
+Do NOT hardcode one domain.
+
+On startup:
+
+GET /domains
+
+Filter:
+
+isActive == true
+
+Store/cache active domains.
+
+When creating a mailbox:
+
+Select an active domain.
+
+If creation fails because domain is invalid/unavailable:
+
+Refresh domains and retry with another active domain.
+
+Do not retry infinitely.
+
+==================================================
+BOT RESTART RECOVERY
+
+When bot starts:
+
+1. Connect PostgreSQL.
+2. Verify database.
+3. Load active mailboxes.
+4. Validate stored Mail.tm credentials/tokens.
+5. Recreate authentication token if required.
+6. Start SSE listeners.
+7. Start Telegram bot.
+8. Start FastAPI server.
+
+Do not lose mailbox-to-user mappings after restart.
+
+==================================================
+FASTAPI
+
+Create:
+
+GET /
+
+Simple service status page.
+
+GET /health
+
+Return:
+
+{
+"status": "ok",
+"database": "connected",
+"telegram": "running",
+"mailtm": "reachable"
+}
+
+Do not expose secrets.
+
+==================================================
+WEBHOOKS
+
+Do NOT invent a Mail.tm webhook endpoint.
+
+Use Mail.tm's documented Mercure SSE real-time event system.
+
+FastAPI is primarily for:
+
+- health
+- service status
+- optional internal endpoints
+
+==================================================
+PROJECT STRUCTURE
+
+Use clean architecture:
+
+app/
+main.py
+
+config.py
+
+bot/
+    handlers/
+        start.py
+        menu.py
+        mailbox.py
+        bonus.py
+        referral.py
+        info.py
+        disclaimer.py
+        help.py
+        admin.py
+
+    keyboards/
+        user.py
+        admin.py
+        force_join.py
+
+    middlewares/
+        maintenance.py
+        force_subscribe.py
+        auth.py
+        rate_limit.py
+
+database/
+    models.py
+    session.py
+    repositories/
+
+services/
+    credit_service.py
+    referral_service.py
+    bonus_service.py
+    mailbox_service.py
+    email_service.py
+    notification_service.py
+    force_join_service.py
+    broadcast_service.py
+
+    mailtm/
+        client.py
+        accounts.py
+        messages.py
+        domains.py
+        realtime.py
+        parser.py
+        sanitizer.py
+
+api/
+    health.py
+
+utils/
+    logging.py
+    encryption.py
+    rate_limiter.py
+
+==================================================
+LOGGING
+
+Log:
+
+User registration
+Mailbox creation
+Mailbox deletion
+Credit changes
+Referral reward
+Daily bonus
+Incoming email
+Mail.tm errors
+Rate limit events
+Admin actions
+Force subscribe errors
+Broadcast results
+
+Never log:
+
+Bot token
+Database password
+Mail.tm passwords
+Mail.tm tokens
+Encryption key
+
+==================================================
+NO FAKE FEATURES
+
+If Mail.tm cannot perform a requested operation:
+
+DO NOT fake success.
+
+Show a real error.
+
+If no active Mail.tm domain is available:
+
+❌ No email domains are currently available.
+
+Try again later.
+
+==================================================
+IMPORTANT USER EXPERIENCE
+
+User should feel like this:
+
+START
+
+↓
+
+Disclaimer
+
+↓
+
+Main Menu
+
+↓
+
+📧 Create New Mail
+
+↓
+
+⏳ Creating...
+
+↓
+
+✅ Mail Created
+
+📧 abc123@domain.com
+
+💳 Balance: 9
+
+↓
+
+Email arrives
+
+↓
+
+📩 NEW EMAIL RECEIVED
+
+↓
+
+User taps View Full Email
+
+↓
+
+Reads the real Mail.tm email.
+
+No manual Inbox button.
+
+==================================================
+NO UNNECESSARY COMMANDS
+
+Do not create:
+
+/balance
+/mail
+/inbox
+/referral
+/bonus
+
+The main user interface should be button-based.
+
+Telegram /start is allowed as the entry point and referral deep-link mechanism.
+
+==================================================
+ADMIN COMMAND ACCESS
+
+Admin panel may optionally support a private admin entry mechanism, but normal users must never see admin controls.
+
+Every admin callback must verify ADMIN_IDS.
+
+==================================================
+TESTING
+
+Before declaring completion, test:
+
+1. New user
+2. Existing user
+3. Signup bonus
+4. Disclaimer agreement
+5. Decline flow
+6. Force subscribe
+7. Maintenance
+8. Create Mail
+9. Credit deduction
+10. Failed Mail.tm creation
+11. Zero balance
+12. Daily bonus
+13. Duplicate daily bonus
+14. Referral
+15. Self referral
+16. Duplicate referral
+17. My Info
+18. Help URL
+19. Incoming Mail.tm email
+20. SSE reconnect
+21. Duplicate message event
+22. Full email
+23. Delete mailbox
+24. Admin panel
+25. Admin credit change
+26. Ban/unban
+27. Broadcast
+28. Database restart
+29. Bot restart
+30. Mail.tm API timeout
+31. Mail.tm 429
+32. Mail.tm 401
+33. Invalid domain
+34. Telegram API failure
+35. Rapid Create button spam
+
+Fix every error discovered.
+
+==================================================
+REPLIT
+
+Create:
+
+requirements.txt
+.env.example
+README.md
+
+Use environment variables.
+
+Required:
+
+BOT_TOKEN=
+DATABASE_URL=
+ADMIN_IDS=
+ENCRYPTION_KEY=
+SUPPORT_BOT_URL=http://t.me/HelpSupportteambot
+
+Do NOT require:
+
+MAILTM_API_KEY
+
+because Mail.tm does not require an API key.
+
+==================================================
+README
+
+Explain:
+
+- Bot creation through BotFather
+- PostgreSQL setup
+- Environment variables
+- Replit setup
+- Running the bot
+- Mail.tm integration
+- Force subscribe configuration
+- Admin configuration
+- Credit system
+- Referral system
+- Daily bonus
+- Troubleshooting
+- Mail.tm limitations
+- Rate limits
+
+Include an important note:
+
+Mail.tm is a temporary email provider. The bot must not promise permanent mailbox availability or guaranteed message retention.
+
+==================================================
+FINAL QUALITY CHECK
+
+After writing all code:
+
+DO NOT immediately say "done".
+
+First inspect the entire repository.
+
+Run:
+
+- syntax checks
+- import checks
+- application startup
+- database initialization
+- Telegram bot startup
+- FastAPI startup
+- Mail.tm domain retrieval
+- Mail.tm account creation test
+- token generation test
+- message retrieval test
+- SSE listener test where possible
+
+Fix all errors.
+
+Check for:
+
+- race conditions
+- duplicate credit deductions
+- duplicate referrals
+- duplicate messages
+- leaked credentials
+- missing awaits
+- unhandled exceptions
+- broken callback buttons
+- broken admin permissions
+- broken restart recovery
+
+Then provide:
+
+1. Final project structure
+2. Environment variables required
+3. Exact Replit run command
+4. What has been implemented
+5. Any Mail.tm limitation that cannot be controlled by the bot
+
+IMPORTANT FINAL RULE:
+
+Never claim a feature is working if it has only been mocked.
+
+Use real Mail.tm API integration everywhere.
