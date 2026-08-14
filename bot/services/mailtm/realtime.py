@@ -74,20 +74,25 @@ class MailEventManager:
                     if not mailbox or mailbox.status != "active":
                         return
                     token = self.cipher.decrypt(mailbox.mailtm_token_encrypted)
-                    account_id = mailbox.mailtm_account_id
-                async for event in self.mailtm.sse_events(account_id, token):
-                    message_id = event_message_id(event)
+                summaries = await self.mailtm.list_messages(token)
+                # Mail.tm's Mercure stream is useful for low-latency delivery,
+                # but it can be interrupted by hosting proxies. Polling the
+                # account API keeps delivery reliable and is deduplicated by
+                # the local message ID constraint.
+                for summary in reversed(summaries):
+                    message_id = event_message_id(summary)
                     if message_id:
                         await self.process_message(mailbox_id, message_id, token)
                 backoff = 1
+                await asyncio.sleep(10)
             except asyncio.CancelledError:
                 raise
             except MailTmError as exc:
-                logger.warning("mail event stream error mailbox_id=%s status=%s", mailbox_id, exc.status)
+                logger.warning("mailbox sync error mailbox_id=%s status=%s", mailbox_id, exc.status)
                 if exc.status == 401:
                     await self._reauthenticate(mailbox_id)
             except Exception:
-                logger.exception("unexpected mail event listener error mailbox_id=%s", mailbox_id)
+                logger.exception("unexpected mailbox sync error mailbox_id=%s", mailbox_id)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60)
 

@@ -145,6 +145,11 @@ class MailTmClient:
     async def get_message(self, message_id: str, token: str) -> dict[str, Any]:
         return await self._request("GET", f"/messages/{message_id}", token=token)
 
+    async def list_messages(self, token: str) -> list[dict[str, Any]]:
+        payload = await self._request("GET", "/messages?page=1", token=token)
+        members = payload if isinstance(payload, list) else payload.get("hydra:member", [])
+        return [item for item in members if isinstance(item, dict)]
+
     async def delete_message(self, message_id: str, token: str) -> None:
         await self._request("DELETE", f"/messages/{message_id}", token=token)
 
