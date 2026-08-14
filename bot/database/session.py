@@ -23,6 +23,13 @@ class Database:
             database_url = urlunsplit(
                 (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
             )
+        # channel_binding is a libpq/psycopg option and is not accepted by
+        # asyncpg. Remove it before SQLAlchemy forwards URL query parameters
+        # to asyncpg.connect().
+        query.pop("channel_binding", None)
+        database_url = urlunsplit(
+            (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
+        )
         self.engine: AsyncEngine = create_async_engine(
             database_url,
             pool_pre_ping=True,
