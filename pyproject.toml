@@ -1,0 +1,17 @@
+[project]
+name = "temp-mail-xpress"
+version = "0.1.0"
+description = "Production-oriented Telegram temporary mail bot using the real Mail.tm API"
+requires-python = ">=3.11"
+dependencies = [
+    "aiogram>=3.13,<4",
+    "aiohttp>=3.10,<4",
+    "asyncpg>=0.29,<1",
+    "bleach>=6.1,<7",
+    "cryptography>=43,<45",
+    "email-validator>=2.2,<3",
+    "fastapi>=0.115,<1",
+    "python-dotenv>=1.0,<2",
+    "sqlalchemy[asyncio]>=2.0,<3",
+    "uvicorn[standard]>=0.30,<1",
+]
