@@ -89,10 +89,10 @@ def mailbox_text(address: str, balance: int, count: int | None = None) -> str:
 
 def email_preview_text(mailbox_address: str, sender: str, subject: str, body: str) -> str:
     return (
-        "📩 NEW EMAIL RECEIVED\n\n"
-        f"📧 To: {safe_text(mailbox_address)}\n"
+        f"📧 {safe_text(mailbox_address)}\n\n"
+        "📩 NEW EMAIL RECEIVED\n"
         f"👤 From: {safe_text(sender)}\n"
         f"📝 Subject: {safe_text(subject)}\n\n"
         "━━━━━━━━━━━━━━\n"
-        f"{clip(safe_text(body), 1700)}"
+        f"{clip(safe_text(body), 1700) or '(No text content)'}"
     )
