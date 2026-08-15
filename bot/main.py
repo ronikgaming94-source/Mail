@@ -125,7 +125,7 @@ async def run() -> None:
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Temp Mail Xpress Telegram bot")
-    parser.add_argument("--check", action="store_true", help="check PostgreSQL, Telegram, and Mail.tm without polling")
+    parser.add_argument("--check", action="store_true", help="check PostgreSQL, Telegram, and email service without polling")
     args = parser.parse_args()
     setup_logging()
     context = await build_context()

@@ -77,14 +77,14 @@ async def gate(message_or_callback: Message | CallbackQuery, *, require_agreemen
 
 async def send_home(message: Message, user: User | None = None) -> None:
     await message.answer(
-        "🏠 Welcome to Temp Mail Xpress.\n\nCreate real temporary Mail.tm mailboxes and receive incoming messages here.",
+        "🏠 Welcome to Temp Mail Xpress.\n\nCreate temporary email inboxes and receive incoming messages here.",
         reply_markup=main_menu(await is_admin(message.from_user.id)),
     )
 
 
 def mailbox_text(address: str, balance: int, count: int | None = None) -> str:
     extra = f"\n📩 Emails received: {count}" if count is not None else ""
-    return f"✅ MAIL CREATED\n\n📧 {address}\n💳 Balance: {balance} Credits{extra}\n\nMail.tm controls availability and retention of this temporary mailbox."
+    return f"📧 NEW EMAIL CREATED\n\nYour Email:\n{address}\n\n💳 Balance:\n{balance} Credits{extra}"
 
 
 def email_preview_text(mailbox_address: str, sender: str, subject: str, body: str) -> str:

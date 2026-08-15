@@ -1,6 +1,6 @@
 # Temp Mail Xpress
 
-An asynchronous Telegram temporary-mail bot backed by PostgreSQL and the real Mail.tm API.
+An asynchronous Telegram temporary-mail bot backed by PostgreSQL and a configured email service.
 
 ## Run & Operate
 
@@ -10,8 +10,8 @@ An asynchronous Telegram temporary-mail bot backed by PostgreSQL and the real Ma
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string
-- `python -m bot.main` — run Telegram polling, Mail.tm listeners, and FastAPI health endpoints
-- `python -m bot.main --check` — validate PostgreSQL, Telegram, and Mail.tm without polling
+- `python -m bot.main` — run Telegram polling, inbox listeners, and FastAPI health endpoints
+- `python -m bot.main --check` — validate PostgreSQL, Telegram, and the email service without polling
 
 ## Stack
 
@@ -28,21 +28,21 @@ An asynchronous Telegram temporary-mail bot backed by PostgreSQL and the real Ma
 - `bot/main.py` — application startup, Telegram polling, FastAPI server, and listener lifecycle
 - `bot/config.py` — environment-backed configuration
 - `bot/database/models.py` — PostgreSQL source-of-truth models
-- `bot/services/mailtm/` — Mail.tm REST, parser, and Mercure SSE implementation
+- `bot/services/mailtm/` — email service REST, parser, and event implementation
 - `bot/services/` — credits, referrals, daily bonus, force subscribe, admin, and mailbox services
 - `bot/bot/handlers/` — button-first Telegram user and admin handlers
 - `README.md`, `.env.example`, `requirements.txt` — operations and setup
 
 ## Architecture decisions
 
-- Mail.tm account creation and local credit deduction are coordinated in one transaction; failed provider operations never consume credits.
-- Mail.tm credentials are encrypted with the application key and are never sent to Telegram or written to logs.
+- Mailbox creation and local credit deduction are coordinated in one transaction; failed provider operations never consume credits.
+- Mailbox credentials are encrypted with the application key and are never sent to Telegram or written to logs.
 - Mercure SSE listeners are centrally tracked and rebuilt from active PostgreSQL mailboxes after restart.
 - Runtime business rules live in `bot_settings` so admins can change bonuses, referrals, maintenance, and notification behavior.
 
 ## Product
 
-Users receive signup credits, create real temporary mailboxes, get automatic Telegram notifications for incoming Mail.tm messages, manage credits and referrals, and claim daily bonuses. Admins manage users, settings, channels, credits, broadcasts, and health.
+Users receive signup credits, create temporary mailboxes, get automatic Telegram notifications for incoming messages, manage credits and referrals, and claim daily bonuses. Admins manage users, settings, channels, credits, broadcasts, and health.
 
 ## User preferences
 
@@ -51,7 +51,7 @@ Users receive signup credits, create real temporary mailboxes, get automatic Tel
 ## Gotchas
 
 - `DATABASE_URL` is normalized for asyncpg; internal Replit PostgreSQL hosts disable SSL while public providers may keep it.
-- Mail.tm controls temporary mailbox retention and availability; the bot must not promise permanence.
+- The email service controls temporary mailbox retention and availability; the bot must not promise permanence.
 - Use `python -m bot.main --check` before enabling long polling on a new environment.
 
 ## Pointers

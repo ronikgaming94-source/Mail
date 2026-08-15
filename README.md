@@ -1,13 +1,12 @@
 # Temp Mail Xpress
 
 Temp Mail Xpress is a production-oriented asynchronous Telegram bot that creates
-real temporary mailboxes through the official Mail.tm API, listens for incoming
-messages through Mail.tm Mercure SSE, and delivers new-message notifications to
-Telegram.
+temporary mailboxes through a secure email service, listens for incoming
+messages, and delivers new-message notifications to Telegram.
 
 ## Included capabilities
 
-- Real Mail.tm domain discovery, account creation, token authentication, message
+- Email domain discovery, account creation, token authentication, message
   retrieval, message deletion, mailbox deletion, rate limiting, retries, and
   encrypted credential storage.
 - Real-time Mercure SSE listeners that reconnect with backoff and recover active
@@ -29,7 +28,7 @@ Required:
 - `DATABASE_URL` — PostgreSQL connection string. Replit's managed PostgreSQL
   environment variable is used when available.
 - `ADMIN_IDS` — comma-separated numeric Telegram IDs.
-- `ENCRYPTION_KEY` — secret used to encrypt Mail.tm passwords and tokens at rest.
+- `ENCRYPTION_KEY` — secret used to encrypt mailbox passwords and tokens at rest.
 - `SUPPORT_BOT_URL` — support URL shown in the Help button.
 
 Optional:
@@ -47,10 +46,10 @@ From the project root:
 python -m bot.main
 ```
 
-The process starts Telegram long polling, restores active Mail.tm listeners, and
+The process starts Telegram long polling, restores active inbox listeners, and
 serves FastAPI health endpoints on `PORT`.
 
-To validate PostgreSQL, Telegram, and Mail.tm without starting polling:
+To validate PostgreSQL, Telegram, and the email service without starting polling:
 
 ```bash
 python -m bot.main --check
@@ -102,20 +101,20 @@ Defaults are stored in PostgreSQL and can be changed by admins:
 - New users receive 10 credits.
 - Daily bonus is 10 credits once every 24 hours.
 - A successful first-time referral gives 5 credits.
-- Creating a real Mail.tm account costs 1 credit only after account, token, and
+- Creating a temporary mailbox costs 1 credit only after account, token, and
   local mailbox persistence all succeed.
 - Every credit change creates a transaction record.
 - Balances cannot become negative.
 
-## Mail.tm behavior and limitations
+## Temporary mailbox behavior and limitations
 
-Mail.tm is a temporary email provider. The bot does not promise permanent
-mailbox availability, a fixed retention period, or guaranteed delivery. Provider
-availability and retention are outside the bot's control.
+The bot does not promise permanent mailbox availability, a fixed retention period,
+or guaranteed delivery. Email service availability and retention are outside the
+bot's control.
 
 The bot discovers active domains at runtime instead of hardcoding one. It uses
-the official Mail.tm REST API and Mercure event hub, and does not require a
-Mail.tm API key. Incoming content is treated as untrusted: Telegram displays
+the configured email service API. Incoming content is treated as untrusted:
+Telegram displays
 plain text by default and sanitized HTML is stored only as a safe copy. Attachment
 metadata is stored, but attachments are not downloaded automatically.
 
@@ -126,8 +125,8 @@ metadata is stored, but attachments are not downloaded automatically.
   asyncpg without SSL; public providers may use SSL.
 - Telegram membership checks fail: add the bot to the channel with permission
   to read members, or disable force subscribe from the admin panel.
-- Mail.tm is unreachable: wait for provider recovery. Creation failures do not
-  deduct credits.
+- The email service is unreachable: wait for service recovery. Creation failures
+  do not deduct credits.
 - Incoming mail stops after a restart: check `/health` and service logs. Active
   mailboxes are loaded from PostgreSQL and their listeners reconnect
   automatically.

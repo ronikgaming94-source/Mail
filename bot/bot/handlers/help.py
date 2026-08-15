@@ -13,9 +13,13 @@ async def help_message(message: Message) -> None:
     if not allowed:
         return
     await message.answer(
-        "🆘 HELP\n\nUse the buttons to create real Mail.tm mailboxes and manage your credits. "
-        "Mailbox availability and retention depend on Mail.tm.",
+        "🆘 HELP\n\n"
+        "Need any help or facing an issue?\n\n"
+        "👇 Tap the button below, contact our Support Team and drop your message. "
+        "Our team will get back to you as soon as possible.",
         reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Contact Support", url=ctx().settings.support_bot_url)]]
+            inline_keyboard=[
+                [InlineKeyboardButton(text="💬 Contact Support", url="http://t.me/HelpSupportteambot")]
+            ]
         ),
     )

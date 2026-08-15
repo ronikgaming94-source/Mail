@@ -64,16 +64,16 @@ async def dashboard(callback: CallbackQuery) -> None:
         settings = await ctx().settings_service.all(session)
     try:
         await ctx().mailtm.domains()
-        mailtm_status = "reachable"
+        email_service_status = "reachable"
     except Exception:
-        mailtm_status = "unreachable"
+        email_service_status = "unreachable"
     await callback.answer()
     await callback.message.edit_text(
         "📊 DASHBOARD\n\n"
         f"👥 Total Users: {stats['users']}\n🟢 Active Users: {stats['active_users']}\n🚫 Banned Users: {stats['banned']}\n"
         f"📧 Total Mailboxes: {stats['mailboxes']}\n📩 Total Emails: {stats['emails']}\n👥 Total Referrals: {stats['referrals']}\n"
         f"💳 Credits Used: {stats['credits_used']}\n💳 Credits Issued: {stats['credits_issued']}\n"
-        f"🔧 Maintenance: {'ON' if settings['maintenance_enabled'] else 'OFF'}\n📡 Mail.tm: {mailtm_status}",
+        f"🔧 Maintenance: {'ON' if settings['maintenance_enabled'] else 'OFF'}\n📡 Email service: {email_service_status}",
         reply_markup=admin_back(),
     )
 
@@ -478,9 +478,9 @@ async def health(callback: CallbackQuery) -> None:
     database = await ctx().database.ping()
     try:
         await ctx().mailtm.domains()
-        mailtm = "reachable"
+        email_service = "reachable"
     except Exception:
-        mailtm = "unreachable"
+        email_service = "unreachable"
     try:
         await ctx().bot.get_me()
         telegram = "reachable"
@@ -488,6 +488,6 @@ async def health(callback: CallbackQuery) -> None:
         telegram = "unreachable"
     await callback.answer()
     await callback.message.edit_text(
-        f"❤️ SYSTEM HEALTH\n\nPostgreSQL: {'connected' if database else 'unavailable'}\nTelegram: {telegram}\nMail.tm: {mailtm}",
+        f"❤️ SYSTEM HEALTH\n\nPostgreSQL: {'connected' if database else 'unavailable'}\nTelegram: {telegram}\nEmail service: {email_service}",
         reply_markup=admin_back(),
     )

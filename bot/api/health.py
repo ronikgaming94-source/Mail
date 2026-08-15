@@ -22,14 +22,14 @@ def create_app() -> FastAPI:
             telegram = "unavailable"
         try:
             await ctx().mailtm.domains()
-            mailtm = "reachable"
+            email_service = "reachable"
         except Exception:
-            mailtm = "unreachable"
+            email_service = "unreachable"
         return {
             "status": "ok" if database and telegram == "running" else "degraded",
             "database": "connected" if database else "unavailable",
             "telegram": telegram,
-            "mailtm": mailtm,
+            "email_service": email_service,
         }
 
     return app

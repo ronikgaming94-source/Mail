@@ -21,7 +21,7 @@ async def create_mail(message: Message) -> None:
     user, allowed = await gate(message)
     if not allowed or not user:
         return
-    progress = await message.answer("⏳ Creating your real Mail.tm mailbox…")
+    progress = await message.answer("⏳ Creating your temporary mailbox…")
     try:
         async with ctx().database.session_factory() as session:
             mailbox = await ctx().mailbox.create(session, user.id)

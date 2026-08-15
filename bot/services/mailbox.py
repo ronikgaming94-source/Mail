@@ -39,7 +39,18 @@ class MailboxService:
                     raise MailTmError("Your account cannot create mailboxes")
                 if user.balance < cost:
                     raise MailTmError("You do not have enough credits")
-                credentials = await self.mailtm.create_account()
+                for _ in range(3):
+                    reserved_addresses = set((await session.scalars(select(Mailbox.email_address))).all())
+                    candidate = await self.mailtm.create_account(reserved_addresses)
+                    duplicate = await session.scalar(
+                        select(Mailbox.id).where(func.lower(Mailbox.email_address) == candidate.address.casefold())
+                    )
+                    if duplicate is None:
+                        credentials = candidate
+                        break
+                    await self.mailtm.delete_account(candidate.account_id, candidate.token)
+                if credentials is None:
+                    raise MailTmError("Unable to create a unique mailbox address")
                 mailbox = Mailbox(
                     user_id=user_id,
                     mailtm_account_id=credentials.account_id,

@@ -103,33 +103,38 @@ class MailTmClient:
         self._domains_at = time.monotonic()
         return list(domains)
 
-    async def create_account(self) -> MailboxCredentials:
+    async def create_account(self, reserved_addresses: set[str] | None = None) -> MailboxCredentials:
         domains = await self.domains()
         if not domains:
             raise MailTmError("No active Mail.tm domains are available")
-        alphabet = string.ascii_lowercase + string.digits
+        reserved = {address.casefold() for address in (reserved_addresses or set())}
         last_error: Exception | None = None
         for domain in domains[:3]:
-            address = "".join(secrets.choice(alphabet) for _ in range(16)) + f"@{domain}"
-            password = secrets.token_urlsafe(24)
-            try:
-                account = await self._request("POST", "/accounts", json_body={"address": address, "password": password})
-                account_id = str(account.get("id") or "")
-                if not account_id:
-                    raise MailTmError("Mail.tm returned no account ID")
-                token_payload = await self._request(
-                    "POST", "/token", json_body={"address": address, "password": password}
-                )
-                token = str(token_payload.get("token") or "")
-                if not token:
-                    raise MailTmError("Mail.tm returned no account token")
-                return MailboxCredentials(account_id, address, password, token)
-            except MailTmError as exc:
-                last_error = exc
-                if exc.status in {400, 404, 422}:
-                    await self.domains(force=True)
+            for _ in range(12):
+                suffix = "".join(secrets.choice(string.digits) for _ in range(6))
+                address = f"TempMailXpress{suffix}@{domain}"
+                if address.casefold() in reserved:
                     continue
-                raise
+                password = secrets.token_urlsafe(24)
+                try:
+                    account = await self._request(
+                        "POST", "/accounts", json_body={"address": address, "password": password}
+                    )
+                    account_id = str(account.get("id") or "")
+                    if not account_id:
+                        raise MailTmError("Mail.tm returned no account ID")
+                    token_payload = await self._request(
+                        "POST", "/token", json_body={"address": address, "password": password}
+                    )
+                    token = str(token_payload.get("token") or "")
+                    if not token:
+                        raise MailTmError("Mail.tm returned no account token")
+                    return MailboxCredentials(account_id, address, password, token)
+                except MailTmError as exc:
+                    last_error = exc
+                    if exc.status in {400, 404, 422}:
+                        continue
+                    raise
         raise MailTmError("Unable to create a Mail.tm mailbox") from last_error
 
     async def authenticate(self, address: str, password: str) -> str:
