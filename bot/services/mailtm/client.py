@@ -73,7 +73,11 @@ class MailTmClient:
                     method, f"{self.base_url}{path}", headers=headers, json=json_body
                 ) as response:
                     if response.status == 429:
-                        delay = min(2**attempt, 30)
+                        retry_after = response.headers.get("Retry-After")
+                        try:
+                            delay = min(max(float(retry_after or 0), 1), 60)
+                        except ValueError:
+                            delay = min(2**attempt, 30)
                         logger.warning("Mail.tm rate limit; retrying in %ss", delay)
                         await asyncio.sleep(delay)
                         continue
@@ -83,6 +87,12 @@ class MailTmClient:
                             continue
                     if response.status < 200 or response.status >= 300:
                         body = await response.text()
+                        detail = body.strip().replace("\n", " ")[:240]
+                        if detail:
+                            raise MailTmError(
+                                f"Mail.tm request failed ({response.status}): {detail}",
+                                response.status,
+                            )
                         raise MailTmError(f"Mail.tm request failed ({response.status})", response.status)
                     if response.status == 204:
                         return {}
@@ -110,12 +120,14 @@ class MailTmClient:
         alphabet = string.ascii_lowercase + string.digits
         reserved = {address.casefold() for address in (reserved_addresses or set())}
         last_error: Exception | None = None
-        for domain in domains[:3]:
+        for domain in domains:
             for _ in range(12):
                 address = "".join(secrets.choice(alphabet) for _ in range(16)) + f"@{domain}"
                 if address.casefold() in reserved:
                     continue
                 password = secrets.token_urlsafe(24)
+                account_id = ""
+                token = ""
                 try:
                     account = await self._request(
                         "POST", "/accounts", json_body={"address": address, "password": password}
@@ -133,7 +145,12 @@ class MailTmClient:
                     return MailboxCredentials(account_id, address, password, token)
                 except MailTmError as exc:
                     last_error = exc
-                    if exc.status in {400, 404, 422}:
+                    if account_id and token:
+                        try:
+                            await self.delete_account(account_id, token)
+                        except MailTmError:
+                            logger.warning("Could not clean up failed Mail.tm account id=%s", account_id)
+                    if exc.status in {400, 401, 404, 409, 422}:
                         continue
                     raise
         raise MailTmError("Unable to create a Mail.tm mailbox") from last_error
