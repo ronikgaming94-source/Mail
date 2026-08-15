@@ -107,12 +107,12 @@ class MailTmClient:
         domains = await self.domains()
         if not domains:
             raise MailTmError("No active Mail.tm domains are available")
+        alphabet = string.ascii_lowercase + string.digits
         reserved = {address.casefold() for address in (reserved_addresses or set())}
         last_error: Exception | None = None
         for domain in domains[:3]:
             for _ in range(12):
-                suffix = "".join(secrets.choice(string.digits) for _ in range(6))
-                address = f"TempMailXpress{suffix}@{domain}"
+                address = "".join(secrets.choice(alphabet) for _ in range(16)) + f"@{domain}"
                 if address.casefold() in reserved:
                     continue
                 password = secrets.token_urlsafe(24)
