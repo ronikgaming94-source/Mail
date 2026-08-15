@@ -62,7 +62,7 @@ class MailTmClient:
         if self.session and not self.session.closed:
             await self.session.close()
 
-    async def _request(self, method: str, path: str, *, token: str | None = None, json_body: dict | None = None, retries: int = 3) -> Any:
+    async def _request(self, method: str, path: str, *, token: str | None = None, json_body: dict | None = None, retries: int = 5) -> Any:
         await self.start()
         assert self.session is not None
         headers = {"Authorization": f"Bearer {token}"} if token else {}
@@ -73,8 +73,8 @@ class MailTmClient:
                     method, f"{self.base_url}{path}", headers=headers, json=json_body
                 ) as response:
                     if response.status == 429:
-                        delay = min(2**attempt, 8)
-                        logger.warning("Mail.tm rate limit; retrying")
+                        delay = min(2**attempt, 30)
+                        logger.warning("Mail.tm rate limit; retrying in %ss", delay)
                         await asyncio.sleep(delay)
                         continue
                     if response.status >= 500:
@@ -123,8 +123,9 @@ class MailTmClient:
                     account_id = str(account.get("id") or "")
                     if not account_id:
                         raise MailTmError("Mail.tm returned no account ID")
+                    provider_address = str(account.get("address") or address).casefold()
                     token_payload = await self._request(
-                        "POST", "/token", json_body={"address": address, "password": password}
+                        "POST", "/token", json_body={"address": provider_address, "password": password}
                     )
                     token = str(token_payload.get("token") or "")
                     if not token:
@@ -138,7 +139,9 @@ class MailTmClient:
         raise MailTmError("Unable to create a Mail.tm mailbox") from last_error
 
     async def authenticate(self, address: str, password: str) -> str:
-        payload = await self._request("POST", "/token", json_body={"address": address, "password": password})
+        payload = await self._request(
+            "POST", "/token", json_body={"address": address.casefold(), "password": password}
+        )
         token = str(payload.get("token") or "")
         if not token:
             raise MailTmError("Mail.tm authentication returned no token")
