@@ -48,7 +48,7 @@ class MailboxService:
                     if duplicate is None:
                         credentials = candidate
                         break
-                    await self.mailtm.delete_account(candidate.account_id, candidate.token)
+                    await self.mailtm.delete_account(candidate.account_id, candidate.token, candidate.address)
                 if credentials is None:
                     raise MailTmError("Unable to create a unique mailbox address")
                 mailbox = Mailbox(
@@ -78,7 +78,11 @@ class MailboxService:
         except Exception:
             if credentials is not None:
                 try:
-                    await self.mailtm.delete_account(credentials.account_id, credentials.token)
+                    await self.mailtm.delete_account(
+                        credentials.account_id,
+                        credentials.token,
+                        credentials.address,
+                    )
                 except Exception:
                     logger.warning("Could not clean up remote Mail.tm account after failed local transaction")
             raise
@@ -97,7 +101,7 @@ class MailboxService:
             raise ValueError("Mailbox not found")
         token = self.decrypt_token(mailbox)
         try:
-            await self.mailtm.delete_account(mailbox.mailtm_account_id, token)
+            await self.mailtm.delete_account(mailbox.mailtm_account_id, token, mailbox.email_address)
         except MailTmError as exc:
             if exc.status != 404:
                 raise

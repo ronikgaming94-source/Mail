@@ -74,7 +74,8 @@ class MailEventManager:
                     if not mailbox or mailbox.status != "active":
                         return
                     token = self.cipher.decrypt(mailbox.mailtm_token_encrypted)
-                summaries = await self.mailtm.list_messages(token)
+                    mailbox_address = mailbox.email_address
+                summaries = await self.mailtm.list_messages(token, mailbox_address)
                 # Mail.tm's Mercure stream is useful for low-latency delivery,
                 # but it can be interrupted by hosting proxies. Polling the
                 # account API keeps delivery reliable and is deduplicated by
@@ -82,7 +83,7 @@ class MailEventManager:
                 for summary in reversed(summaries):
                     message_id = event_message_id(summary)
                     if message_id:
-                        await self.process_message(mailbox_id, message_id, token)
+                        await self.process_message(mailbox_id, message_id, token, mailbox_address)
                 backoff = 1
                 await asyncio.sleep(3)
             except asyncio.CancelledError:
@@ -111,7 +112,13 @@ class MailEventManager:
                 await session.commit()
                 logger.warning("mailbox token refresh failed mailbox_id=%s", mailbox_id)
 
-    async def process_message(self, mailbox_id: int, message_id: str, token: str) -> None:
+    async def process_message(
+        self,
+        mailbox_id: int,
+        message_id: str,
+        token: str,
+        mailbox_address: str | None = None,
+    ) -> None:
         async with self.database.session_factory() as session:
             mailbox = await session.get(Mailbox, mailbox_id)
             if not mailbox or mailbox.status != "active":
@@ -121,7 +128,7 @@ class MailEventManager:
                 return
             if await session.scalar(select(EmailMessage.id).where(EmailMessage.mailtm_message_id == message_id)):
                 return
-            payload = await self.mailtm.get_message(message_id, token)
+            payload = await self.mailtm.get_message(message_id, token, mailbox_address or mailbox.email_address)
             parsed = parse_message(payload)
             if not parsed["mailtm_message_id"]:
                 parsed["mailtm_message_id"] = message_id

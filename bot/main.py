@@ -40,7 +40,12 @@ async def build_context() -> AppContext:
     async with database.session_factory() as session:
         await settings_service.ensure_defaults(session)
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=None))
-    mailtm = MailTmClient(settings.mailtm_api_base, settings.mailtm_hub_url, settings.mailtm_rate_per_second)
+    mailtm = MailTmClient(
+        settings.mailtm_api_base,
+        settings.mailtm_hub_url,
+        settings.mailtm_rate_per_second,
+        settings.mailtm_fallback_api_base,
+    )
     await mailtm.start()
     cipher = CredentialCipher(settings.encryption_key)
     credits = CreditService()

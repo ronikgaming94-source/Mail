@@ -40,6 +40,7 @@ class Settings:
     port: int
     mailtm_api_base: str = "https://api.mail.tm"
     mailtm_hub_url: str = "https://mercure.mail.tm/.well-known/mercure"
+    mailtm_fallback_api_base: str = "https://api.mail.gw"
     # Mail.tm currently limits the API to roughly 30 requests per minute.
     # Keep a small safety margin so polling does not block mailbox creation.
     mailtm_rate_per_second: float = 0.4
