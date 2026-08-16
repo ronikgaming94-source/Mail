@@ -15,7 +15,22 @@ from bot.services.mailtm.client import MailTmError
 
 logger = logging.getLogger(__name__)
 router = Router(name="mailbox")
-_creation_locks: dict[int, asyncio.Lock] = {}
+
+
+async def _animate_creation(progress: Message) -> None:
+    frames = (
+        "⏳ Creating your temporary mailbox…\n\n🔐 Preparing secure inbox",
+        "⏳ Creating your temporary mailbox…\n\n🌐 Connecting to email service",
+        "⏳ Creating your temporary mailbox…\n\n📬 Activating your inbox",
+    )
+    frame = 0
+    while True:
+        await asyncio.sleep(0.9)
+        frame = (frame + 1) % len(frames)
+        try:
+            await progress.edit_text(frames[frame])
+        except Exception:
+            logger.debug("Could not update mailbox creation animation", exc_info=True)
 
 
 @router.message(F.text == "📧 Create New Mail")
@@ -23,36 +38,24 @@ async def create_mail(message: Message) -> None:
     user, allowed = await gate(message)
     if not allowed or not user:
         return
-    lock = _creation_locks.setdefault(message.from_user.id, asyncio.Lock())
-    if lock.locked():
-        await message.answer("⏳ A mailbox is already being created. Please wait for it to finish.")
-        return
-    await lock.acquire()
+    progress = await message.answer("⏳ Creating your temporary mailbox…\n\n🔐 Preparing secure inbox")
+    animation = asyncio.create_task(_animate_creation(progress))
     try:
-        progress = await message.answer("⏳ Creating your temporary mailbox…")
-        try:
-            async with ctx().database.session_factory() as session:
-                mailbox = await ctx().mailbox.create(session, user.id)
-                fresh_user = await session.get(User, user.id)
-                balance = fresh_user.balance if fresh_user else 0
-            ctx().events.add(mailbox.id)
-            await progress.edit_text(mailbox_text(mailbox.email_address, balance), reply_markup=mailbox_card(mailbox.id))
-        except MailTmError as exc:
-            logger.warning("mailbox creation refused: %s", str(exc))
-            if str(exc) == "You do not have enough credits":
-                text = "❌ You do not have enough credits.\n\nClaim your daily bonus or ask an admin for credits."
-            elif exc.status == 429:
-                text = "❌ The email service is busy right now.\n\nPlease try again in a minute."
-            elif exc.status and exc.status >= 500:
-                text = "❌ The email service is temporarily unavailable.\n\nPlease try again in a moment."
-            else:
-                text = "❌ Unable to create your email right now.\n\nPlease try again in a moment."
-            await progress.edit_text(text)
-        except Exception:
-            logger.exception("mailbox creation failed")
-            await progress.edit_text("❌ Unable to create your email right now.\n\nPlease try again in a moment.")
+        async with ctx().database.session_factory() as session:
+            mailbox = await ctx().mailbox.create(session, user.id)
+            fresh_user = await session.get(User, user.id)
+            balance = fresh_user.balance if fresh_user else 0
+        ctx().events.add(mailbox.id)
+        await progress.edit_text(mailbox_text(mailbox.email_address, balance), reply_markup=mailbox_card(mailbox.id))
+    except MailTmError as exc:
+        logger.warning("mailbox creation refused: %s", str(exc))
+        await progress.edit_text("❌ Unable to create your email right now.\n\nPlease try again in a moment.")
+    except Exception:
+        logger.exception("mailbox creation failed")
+        await progress.edit_text("❌ Unable to create your email right now.\n\nPlease try again in a moment.")
     finally:
-        lock.release()
+        animation.cancel()
+        await asyncio.gather(animation, return_exceptions=True)
 
 
 @router.callback_query(lambda call: call.data == "mailbox:list")

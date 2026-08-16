@@ -47,6 +47,7 @@ async def build_context() -> AppContext:
         settings.mailtm_fallback_api_base,
     )
     await mailtm.start()
+    await mailtm.warm_domains()
     cipher = CredentialCipher(settings.encryption_key)
     credits = CreditService()
     mailbox = MailboxService(mailtm, cipher, credits, settings_service)

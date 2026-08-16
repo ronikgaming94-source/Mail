@@ -61,7 +61,7 @@ class MailTmClient:
             # The fallback API is used for new accounts and has a separate
             # quota from the legacy provider. Keep it responsive without
             # allowing bursts.
-            self._rate_limiters[self.fallback_base_url] = AsyncRateLimiter(1.0)
+            self._rate_limiters[self.fallback_base_url] = AsyncRateLimiter(2.0)
         self.session: aiohttp.ClientSession | None = None
         self._domains_by_base: dict[str, list[str]] = {}
         self._domains_at: dict[str, float] = {}
@@ -145,6 +145,17 @@ class MailTmClient:
             except MailTmError:
                 logger.warning("Could not load domains from %s", base_url)
         return list(dict.fromkeys(all_domains))
+
+    async def warm_domains(self) -> None:
+        """Load provider domains during startup so user actions stay fast."""
+        bases = dict.fromkeys((self.base_url, self.fallback_base_url))
+        results = await asyncio.gather(
+            *(self._domains_for_base(base_url) for base_url in bases),
+            return_exceptions=True,
+        )
+        for base_url, result in zip(bases, results):
+            if isinstance(result, Exception):
+                logger.warning("Could not warm domains from %s", base_url)
 
     async def _base_for_address(self, address: str) -> str:
         domain = address.rsplit("@", 1)[-1].casefold()
