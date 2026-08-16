@@ -84,7 +84,7 @@ class MailEventManager:
                     if message_id:
                         await self.process_message(mailbox_id, message_id, token)
                 backoff = 1
-                await asyncio.sleep(10)
+                await asyncio.sleep(3)
             except asyncio.CancelledError:
                 raise
             except MailTmError as exc:
