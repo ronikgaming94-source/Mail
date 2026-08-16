@@ -56,6 +56,12 @@ class MailTmClient:
         self.hub_url = hub_url
         self.fallback_base_url = fallback_base_url.rstrip("/")
         self.rate_limiter = AsyncRateLimiter(rate_per_second)
+        self._rate_limiters: dict[str, AsyncRateLimiter] = {self.base_url: self.rate_limiter}
+        if self.fallback_base_url != self.base_url:
+            # The fallback API is used for new accounts and has a separate
+            # quota from the legacy provider. Keep it responsive without
+            # allowing bursts.
+            self._rate_limiters[self.fallback_base_url] = AsyncRateLimiter(1.0)
         self.session: aiohttp.ClientSession | None = None
         self._domains_by_base: dict[str, list[str]] = {}
         self._domains_at: dict[str, float] = {}
@@ -86,7 +92,8 @@ class MailTmClient:
         request_base = (base_url or self.base_url).rstrip("/")
         last_status: int | None = None
         for attempt in range(retries):
-            await self.rate_limiter.wait()
+            limiter = self._rate_limiters.setdefault(request_base, self.rate_limiter)
+            await limiter.wait()
             try:
                 async with self.session.request(
                     method, f"{request_base}{path}", headers=headers, json=json_body
@@ -151,7 +158,9 @@ class MailTmClient:
         alphabet = string.ascii_lowercase + string.digits
         reserved = {address.casefold() for address in (reserved_addresses or set())}
         last_error: Exception | None = None
-        providers = dict.fromkeys((self.base_url, self.fallback_base_url))
+        # Prefer the responsive provider for new accounts. Existing accounts
+        # are still routed by their domain and remain on their original API.
+        providers = dict.fromkeys((self.fallback_base_url, self.base_url))
         for provider_base in providers:
             try:
                 domains = await self._domains_for_base(provider_base)
