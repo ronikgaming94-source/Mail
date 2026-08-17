@@ -50,7 +50,15 @@ async def build_context() -> AppContext:
     await mailtm.warm_domains()
     cipher = CredentialCipher(settings.encryption_key)
     credits = CreditService()
-    mailbox = MailboxService(mailtm, cipher, credits, settings_service)
+    mailbox = MailboxService(
+        mailtm,
+        cipher,
+        credits,
+        settings_service,
+        database,
+        settings.mailbox_pool_target,
+        settings.mailbox_pool_refill_threshold,
+    )
 
     async def notify(telegram_id, message, mailbox_record) -> None:
         async with database.session_factory() as session:
@@ -115,6 +123,10 @@ async def run() -> None:
     context = await build_context()
     dispatcher = build_dispatcher()
     await context.events.start()
+    pool_task = asyncio.create_task(
+        context.mailbox.run_pool_refiller(context.settings.mailbox_pool_refill_interval),
+        name="mailbox-pool-refiller",
+    )
     api = create_app()
     server = Server(Config(api, host="0.0.0.0", port=context.settings.port, log_config=None))
     try:
@@ -123,6 +135,8 @@ async def run() -> None:
             server.serve(),
         )
     finally:
+        pool_task.cancel()
+        await asyncio.gather(pool_task, return_exceptions=True)
         await context.events.stop()
         await context.mailtm.close()
         await context.bot.session.close()
@@ -140,13 +154,21 @@ async def main() -> None:
             await run_check(context)
         else:
             await context.events.start()
+            pool_task = asyncio.create_task(
+                context.mailbox.run_pool_refiller(context.settings.mailbox_pool_refill_interval),
+                name="mailbox-pool-refiller",
+            )
             dispatcher = build_dispatcher()
             api = create_app()
             server = Server(Config(api, host="0.0.0.0", port=context.settings.port, log_config=None))
-            await asyncio.gather(
-                dispatcher.start_polling(context.bot, allowed_updates=dispatcher.resolve_used_update_types()),
-                server.serve(),
-            )
+            try:
+                await asyncio.gather(
+                    dispatcher.start_polling(context.bot, allowed_updates=dispatcher.resolve_used_update_types()),
+                    server.serve(),
+                )
+            finally:
+                pool_task.cancel()
+                await asyncio.gather(pool_task, return_exceptions=True)
     finally:
         await context.events.stop()
         await context.mailtm.close()

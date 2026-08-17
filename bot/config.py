@@ -43,7 +43,10 @@ class Settings:
     mailtm_fallback_api_base: str = "https://api.mail.gw"
     # Mail.tm currently limits the API to roughly 30 requests per minute.
     # Keep a small safety margin so polling does not block mailbox creation.
-    mailtm_rate_per_second: float = 0.4
+    mailtm_rate_per_second: float = 1.0
+    mailbox_pool_target: int = 20
+    mailbox_pool_refill_threshold: int = 10
+    mailbox_pool_refill_interval: int = 10
     attachment_limit_bytes: int = 10 * 1024 * 1024
 
     @classmethod
@@ -60,4 +63,14 @@ class Settings:
             encryption_key=_required("ENCRYPTION_KEY"),
             support_bot_url=os.getenv("SUPPORT_BOT_URL", "https://t.me/HelpSupportteambot"),
             port=int(os.getenv("PORT", "8000")),
+            mailtm_api_base=os.getenv("MAILTM_API_BASE", "https://api.mail.tm"),
+            mailtm_hub_url=os.getenv(
+                "MAILTM_HUB_URL",
+                "https://mercure.mail.tm/.well-known/mercure",
+            ),
+            mailtm_fallback_api_base=os.getenv("MAILTM_FALLBACK_API_BASE", "https://api.mail.gw"),
+            mailtm_rate_per_second=float(os.getenv("MAILTM_RATE_PER_SECOND", "1.0")),
+            mailbox_pool_target=max(int(os.getenv("MAILBOX_POOL_TARGET", "20")), 1),
+            mailbox_pool_refill_threshold=max(int(os.getenv("MAILBOX_POOL_REFILL_THRESHOLD", "10")), 0),
+            mailbox_pool_refill_interval=max(int(os.getenv("MAILBOX_POOL_REFILL_INTERVAL", "10")), 5),
         )

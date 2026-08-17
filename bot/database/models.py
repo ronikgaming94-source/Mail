@@ -37,7 +37,11 @@ class Mailbox(Base):
     __table_args__ = (Index("ix_mailboxes_user_status", "user_id", "status"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=True,
+    )
     mailtm_account_id: Mapped[str] = mapped_column(String(255), unique=True)
     email_address: Mapped[str] = mapped_column(String(320), unique=True)
     mailtm_password_encrypted: Mapped[str] = mapped_column(Text)
@@ -45,7 +49,7 @@ class Mailbox(Base):
     status: Mapped[str] = mapped_column(String(30), default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    user: Mapped[User] = relationship(back_populates="mailboxes")
+    user: Mapped[User | None] = relationship(back_populates="mailboxes")
     messages: Mapped[list["EmailMessage"]] = relationship(
         back_populates="mailbox", cascade="all, delete-orphan", passive_deletes=True
     )

@@ -43,6 +43,10 @@ class Database:
     async def init(self) -> None:
         async with self.engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
+            if connection.dialect.name == "postgresql":
+                # Pool mailboxes are created before assignment, so they do not
+                # have a user_id until an atomic claim assigns them.
+                await connection.execute(text("ALTER TABLE mailboxes ALTER COLUMN user_id DROP NOT NULL"))
 
     async def ping(self) -> bool:
         try:

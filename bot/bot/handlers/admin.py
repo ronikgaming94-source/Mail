@@ -448,9 +448,43 @@ async def mailbox_email_stats(callback: CallbackQuery) -> None:
         return
     async with ctx().database.session_factory() as session:
         stats = await ctx().admin.dashboard(session)
+    pool = await ctx().mailbox.pool_stats()
+    provider_lines = "\n".join(
+        f"  • {domain}: {count}" for domain, count in sorted(pool["providers"].items())
+    ) or "  • No available mailbox"
     await callback.answer()
     await callback.message.edit_text(
-        f"📧 Mailboxes: {stats['mailboxes']}\n📩 Emails: {stats['emails']}\n\nUse Users to inspect individual owners.",
+        f"📧 Assigned mailboxes: {stats['mailboxes']}\n"
+        f"📩 Emails received: {stats['emails']}\n\n"
+        f"📦 PRE-CREATED POOL\n"
+        f"🟢 Available: {pool['available']} / {ctx().mailbox.pool_target}\n"
+        f"👤 Active/assigned: {pool['active']}\n"
+        f"🗑 Deleted/used: {pool['deleted']}\n"
+        f"⚙️ Auto-refill starts below: {ctx().mailbox.pool_refill_threshold}\n"
+        f"🌐 Available by provider/domain:\n{provider_lines}\n\n"
+        "Press Mailbox Pool Stock again for a live refresh.",
+        reply_markup=admin_back(),
+    )
+
+
+@router.callback_query(lambda call: call.data == "admin:pool")
+async def pool_stock(callback: CallbackQuery) -> None:
+    if not await _guard(callback) or not callback.message:
+        return
+    pool = await ctx().mailbox.pool_stats()
+    provider_lines = "\n".join(
+        f"  • {domain}: {count}" for domain, count in sorted(pool["providers"].items())
+    ) or "  • No available mailbox"
+    await callback.answer()
+    await callback.message.edit_text(
+        "📦 MAILBOX POOL STOCK\n\n"
+        f"🟢 Available now: {pool['available']} / {ctx().mailbox.pool_target}\n"
+        f"👤 Active/assigned: {pool['active']}\n"
+        f"🗑 Deleted/used: {pool['deleted']}\n"
+        f"⚙️ Auto-refill when available < {ctx().mailbox.pool_refill_threshold}\n\n"
+        f"🌐 Provider/domain split:\n{provider_lines}\n\n"
+        "This view reads the database live. Pool mailboxes are never shown to users "
+        "until atomically claimed.",
         reply_markup=admin_back(),
     )
 

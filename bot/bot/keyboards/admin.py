@@ -6,6 +6,7 @@ def admin_menu() -> InlineKeyboardMarkup:
         ("📊 Dashboard", "admin:dashboard"),
         ("👥 Users", "admin:users"),
         ("📧 Mailboxes", "admin:mailboxes"),
+        ("📦 Mailbox Pool Stock", "admin:pool"),
         ("📩 Emails", "admin:emails"),
         ("💳 Credits", "admin:credits"),
         ("🎁 Daily Bonus", "admin:bonus"),

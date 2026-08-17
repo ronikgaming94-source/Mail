@@ -169,8 +169,10 @@ class MailTmClient:
         alphabet = string.ascii_lowercase + string.digits
         reserved = {address.casefold() for address in (reserved_addresses or set())}
         last_error: Exception | None = None
-        # Prefer the responsive provider for new accounts. Existing accounts
-        # are still routed by their domain and remain on their original API.
+        # Mail.gw and Mail.tm are independent free providers. Prefer Mail.gw
+        # for new accounts, then immediately fall back to Mail.tm when it is
+        # unavailable or rate-limited. Existing accounts are always routed by
+        # their saved domain.
         providers = dict.fromkeys((self.fallback_base_url, self.base_url))
         for provider_base in providers:
             try:
@@ -178,7 +180,6 @@ class MailTmClient:
             except MailTmError as exc:
                 last_error = exc
                 continue
-            provider_rate_limited = False
             for domain in domains[:3]:
                 for _ in range(12):
                     address = "".join(secrets.choice(alphabet) for _ in range(16)) + f"@{domain}"
@@ -211,13 +212,21 @@ class MailTmClient:
                         last_error = exc
                         if exc.status in {400, 404, 422}:
                             continue
-                        if exc.status == 429:
-                            provider_rate_limited = True
+                        # A provider can fail temporarily with a quota or
+                        # upstream error. Try the other provider instead of
+                        # making the user wait through repeated retries.
+                        if exc.status in {429, 500, 502, 503, 504}:
                             break
-                        raise
-                if provider_rate_limited:
+                        break
+                if last_error is not None and getattr(last_error, "status", None) in {
+                    429,
+                    500,
+                    502,
+                    503,
+                    504,
+                }:
                     break
-        raise MailTmError("Unable to create a Mail.tm mailbox") from last_error
+        raise MailTmError("Both free email providers are temporarily unavailable") from last_error
 
     async def authenticate(self, address: str, password: str) -> str:
         provider_base = await self._base_for_address(address)
