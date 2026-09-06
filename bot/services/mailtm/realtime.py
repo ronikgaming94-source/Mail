@@ -113,15 +113,26 @@ class MailEventManager:
             mailbox = await session.get(Mailbox, mailbox_id)
             if not mailbox or mailbox.status != "active":
                 return
-            try:
-                password = self.cipher.decrypt(mailbox.mailtm_password_encrypted)
-                token = await self.mailtm.authenticate(mailbox.email_address, password)
+            mailbox_address = mailbox.email_address
+            password = self.cipher.decrypt(mailbox.mailtm_password_encrypted)
+
+        # Never hold a database connection while waiting on the provider.
+        try:
+            token = await self.mailtm.authenticate(mailbox_address, password)
+        except Exception:
+            async with self.database.session_factory() as session:
+                mailbox = await session.get(Mailbox, mailbox_id)
+                if mailbox and mailbox.status == "active":
+                    mailbox.status = "error"
+                    await session.commit()
+            logger.warning("mailbox token refresh failed mailbox_id=%s", mailbox_id)
+            return
+
+        async with self.database.session_factory() as session:
+            mailbox = await session.get(Mailbox, mailbox_id)
+            if mailbox and mailbox.status == "active":
                 mailbox.mailtm_token_encrypted = self.cipher.encrypt(token)
                 await session.commit()
-            except Exception:
-                mailbox.status = "error"
-                await session.commit()
-                logger.warning("mailbox token refresh failed mailbox_id=%s", mailbox_id)
 
     async def process_message(
         self,
@@ -139,10 +150,24 @@ class MailEventManager:
                 return
             if await session.scalar(select(EmailMessage.id).where(EmailMessage.mailtm_message_id == message_id)):
                 return
-            payload = await self.mailtm.get_message(message_id, token, mailbox_address or mailbox.email_address)
-            parsed = parse_message(payload)
-            if not parsed["mailtm_message_id"]:
-                parsed["mailtm_message_id"] = message_id
+            address = mailbox_address or mailbox.email_address
+
+        # Fetching the message can take time and must not occupy a database
+        # connection while the provider responds.
+        payload = await self.mailtm.get_message(message_id, token, address)
+        parsed = parse_message(payload)
+        if not parsed["mailtm_message_id"]:
+            parsed["mailtm_message_id"] = message_id
+
+        async with self.database.session_factory() as session:
+            mailbox = await session.get(Mailbox, mailbox_id)
+            if not mailbox or mailbox.status != "active":
+                return
+            user = await session.get(User, mailbox.user_id)
+            if not user or user.is_banned:
+                return
+            if await session.scalar(select(EmailMessage.id).where(EmailMessage.mailtm_message_id == message_id)):
+                return
             message = EmailMessage(mailbox_id=mailbox.id, **parsed)
             session.add(message)
             try:
@@ -151,4 +176,6 @@ class MailEventManager:
                 await session.rollback()
                 return
             await session.refresh(message)
-            await self.notify(user.telegram_id, message, mailbox)
+            telegram_id = user.telegram_id
+
+        await self.notify(telegram_id, message, mailbox)
