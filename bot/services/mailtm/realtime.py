@@ -119,13 +119,25 @@ class MailEventManager:
         # Never hold a database connection while waiting on the provider.
         try:
             token = await self.mailtm.authenticate(mailbox_address, password)
-        except Exception:
+        except MailTmError as exc:
+            # A rate limit or upstream outage is temporary; do not disable a
+            # healthy mailbox just because re-authentication was delayed.
+            if exc.status not in {401, 403}:
+                logger.warning(
+                    "mailbox token refresh deferred mailbox_id=%s status=%s",
+                    mailbox_id,
+                    exc.status,
+                )
+                return
             async with self.database.session_factory() as session:
                 mailbox = await session.get(Mailbox, mailbox_id)
                 if mailbox and mailbox.status == "active":
                     mailbox.status = "error"
                     await session.commit()
-            logger.warning("mailbox token refresh failed mailbox_id=%s", mailbox_id)
+            logger.warning("mailbox token refresh failed mailbox_id=%s status=%s", mailbox_id, exc.status)
+            return
+        except Exception:
+            logger.exception("mailbox token refresh deferred mailbox_id=%s", mailbox_id)
             return
 
         async with self.database.session_factory() as session:
