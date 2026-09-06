@@ -45,6 +45,7 @@ async def build_context() -> AppContext:
         settings.mailtm_hub_url,
         settings.mailtm_rate_per_second,
         settings.mailtm_fallback_api_base,
+        settings.mailtm_fallback_hub_url,
     )
     await mailtm.start()
     await mailtm.warm_domains()
@@ -113,6 +114,17 @@ def build_dispatcher() -> Dispatcher:
     return dispatcher
 
 
+async def warm_mailbox_pool(context: AppContext) -> None:
+    try:
+        # Prime the local pool before Telegram polling starts so normal user
+        # requests only perform a database claim, not remote account creation.
+        added = await context.mailbox.replenish_pool()
+        if added:
+            logger.info("mailbox pool warmed count=%s", added)
+    except Exception:
+        logger.exception("initial mailbox pool warm-up failed; background refill will retry")
+
+
 async def run_check(context: AppContext) -> None:
     await context.mailtm.domains(force=True)
     me = await context.bot.get_me()
@@ -122,6 +134,7 @@ async def run_check(context: AppContext) -> None:
 async def run() -> None:
     context = await build_context()
     dispatcher = build_dispatcher()
+    await warm_mailbox_pool(context)
     await context.events.start()
     pool_task = asyncio.create_task(
         context.mailbox.run_pool_refiller(context.settings.mailbox_pool_refill_interval),
@@ -153,6 +166,7 @@ async def main() -> None:
         if args.check:
             await run_check(context)
         else:
+            await warm_mailbox_pool(context)
             await context.events.start()
             pool_task = asyncio.create_task(
                 context.mailbox.run_pool_refiller(context.settings.mailbox_pool_refill_interval),
