@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from aiogram import F, Router
@@ -21,20 +22,19 @@ async def create_mail(message: Message) -> None:
     user, allowed = await gate(message)
     if not allowed or not user:
         return
-    progress = await message.answer("⏳ Creating your mailbox…")
     try:
         async with ctx().database.session_factory() as session:
-            mailbox = await ctx().mailbox.create(session, user.id)
-            fresh_user = await session.get(User, user.id)
-            balance = fresh_user.balance if fresh_user else 0
+            mailbox, balance = await ctx().mailbox.create(session, user.id)
         ctx().events.add(mailbox.id)
-        await progress.edit_text(mailbox_text(mailbox.email_address, balance), reply_markup=mailbox_card(mailbox.id))
+        # Refill in the background so the next user also gets the fast pool path.
+        asyncio.create_task(ctx().mailbox.replenish_pool(), name="mailbox-pool-refill-after-claim")
+        await message.answer(mailbox_text(mailbox.email_address, balance), reply_markup=mailbox_card(mailbox.id))
     except MailTmError as exc:
         logger.warning("mailbox creation refused: %s", str(exc))
-        await progress.edit_text("❌ Unable to create your email right now.\n\nPlease try again in a moment.")
+        await message.answer("❌ Unable to create your email right now.\n\nPlease try again in a moment.")
     except Exception:
         logger.exception("mailbox creation failed")
-        await progress.edit_text("❌ Unable to create your email right now.\n\nPlease try again in a moment.")
+        await message.answer("❌ Unable to create your email right now.\n\nPlease try again in a moment.")
 
 
 @router.callback_query(lambda call: call.data == "mailbox:list")
