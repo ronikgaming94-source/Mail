@@ -51,17 +51,19 @@ class MailTmClient:
         hub_url: str,
         rate_per_second: float = 7.0,
         fallback_base_url: str = "https://api.mail.gw",
+        fallback_hub_url: str = "https://api.mail.gw/.well-known/mercure",
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.hub_url = hub_url
         self.fallback_base_url = fallback_base_url.rstrip("/")
+        self.fallback_hub_url = fallback_hub_url.rstrip("/")
         self.rate_limiter = AsyncRateLimiter(rate_per_second)
         self._rate_limiters: dict[str, AsyncRateLimiter] = {self.base_url: self.rate_limiter}
         if self.fallback_base_url != self.base_url:
             # The fallback API is used for new accounts and has a separate
             # quota from the legacy provider. Keep it responsive without
             # allowing bursts.
-            self._rate_limiters[self.fallback_base_url] = AsyncRateLimiter(2.0)
+            self._rate_limiters[self.fallback_base_url] = AsyncRateLimiter(1.0)
         self.session: aiohttp.ClientSession | None = None
         self._domains_by_base: dict[str, list[str]] = {}
         self._domains_at: dict[str, float] = {}
@@ -83,7 +85,7 @@ class MailTmClient:
         *,
         token: str | None = None,
         json_body: dict | None = None,
-        retries: int = 5,
+        retries: int = 3,
         base_url: str | None = None,
     ) -> Any:
         await self.start()
@@ -102,7 +104,12 @@ class MailTmClient:
                     if response.status == 429:
                         if attempt == retries - 1:
                             raise MailTmError("Mail service rate limit reached", response.status)
-                        delay = min(2**attempt, 30)
+                        retry_after = response.headers.get("Retry-After")
+                        try:
+                            delay = max(float(retry_after), 1.0) if retry_after else min(2**attempt, 30)
+                        except ValueError:
+                            delay = min(2**attempt, 30)
+                        delay = min(delay, 30)
                         logger.warning("Mail service rate limit; retrying in %ss", delay)
                         await asyncio.sleep(delay)
                         continue
@@ -202,6 +209,7 @@ class MailTmClient:
                             "POST",
                             "/token",
                             json_body={"address": provider_address, "password": password},
+                            retries=1,
                             base_url=provider_base,
                         )
                         token = str(token_payload.get("token") or "")
@@ -259,12 +267,16 @@ class MailTmClient:
         provider_base = await self._base_for_address(address) if address else self.base_url
         await self._request("DELETE", f"/messages/{message_id}", token=token, base_url=provider_base)
 
-    async def sse_events(self, account_id: str, token: str) -> AsyncIterator[dict[str, Any]]:
+    async def sse_events(
+        self, account_id: str, token: str, address: str | None = None
+    ) -> AsyncIterator[dict[str, Any]]:
         await self.start()
         assert self.session is not None
         params = {"topic": f"/accounts/{account_id}"}
         headers = {"Authorization": f"Bearer {token}", "Accept": "text/event-stream"}
-        async with self.session.get(self.hub_url, params=params, headers=headers) as response:
+        provider_base = await self._base_for_address(address) if address else self.base_url
+        hub_url = self.fallback_hub_url if provider_base == self.fallback_base_url else self.hub_url
+        async with self.session.get(hub_url, params=params, headers=headers, timeout=None) as response:
             if response.status != 200:
                 raise MailTmError(f"Mail.tm event stream unavailable ({response.status})", response.status)
             event_name = ""
