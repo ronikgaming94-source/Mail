@@ -35,7 +35,6 @@ class MailboxService:
         self.database = database
         self.pool_target = max(pool_target, 0)
         self.pool_refill_threshold = max(min(pool_refill_threshold, self.pool_target), 0)
-        self._remote_creation_lock = asyncio.Lock()
         self._pool_refill_lock = asyncio.Lock()
 
     async def create(self, session: AsyncSession, user_id: int) -> Mailbox:
@@ -43,6 +42,8 @@ class MailboxService:
         await session.rollback()
         credentials = None
         try:
+            # Claiming a warm mailbox is entirely local and does not hold a
+            # database transaction open while talking to the remote provider.
             async with session.begin():
                 user = await session.scalar(select(User).where(User.id == user_id).with_for_update())
                 if user is None or user.is_banned:
@@ -50,8 +51,6 @@ class MailboxService:
                 if user.balance < cost:
                     raise MailTmError("You do not have enough credits")
 
-                # Claiming is database-atomic: two users cannot receive the
-                # same pre-created mailbox, even if they tap simultaneously.
                 mailbox = await session.scalar(
                     select(Mailbox)
                     .where(Mailbox.status == "available", Mailbox.user_id.is_(None))
@@ -62,29 +61,46 @@ class MailboxService:
                 if mailbox is not None:
                     mailbox.user_id = user_id
                     mailbox.status = "active"
-                else:
-                    for _ in range(3):
-                        reserved_addresses = set((await session.scalars(select(Mailbox.email_address))).all())
-                        async with self._remote_creation_lock:
-                            candidate = await self.mailtm.create_account(reserved_addresses)
-                        duplicate = await session.scalar(
-                            select(Mailbox.id).where(func.lower(Mailbox.email_address) == candidate.address.casefold())
+                    user.balance -= cost
+                    session.add(
+                        CreditTransaction(
+                            user_id=user_id,
+                            amount=-cost,
+                            type="MAIL_CREATION",
+                            description="Mail.tm mailbox creation",
+                            reference_id=mailbox.mailtm_account_id,
                         )
-                        if duplicate is None:
-                            credentials = candidate
-                            break
-                        await self.mailtm.delete_account(candidate.account_id, candidate.token, candidate.address)
-                    if credentials is None:
-                        raise MailTmError("Unable to create a unique mailbox")
-                    mailbox = Mailbox(
-                        user_id=user_id,
-                        mailtm_account_id=credentials.account_id,
-                        email_address=credentials.address,
-                        mailtm_password_encrypted=self.cipher.encrypt(credentials.password),
-                        mailtm_token_encrypted=self.cipher.encrypt(credentials.token),
-                        status="active",
                     )
-                    session.add(mailbox)
+                    await session.flush()
+                    logger.info("mailbox created user_id=%s mailbox_id=%s source=pool", user_id, mailbox.id)
+                    return mailbox
+
+            # No warm mailbox was available. Create the remote account outside
+            # the user transaction so provider latency cannot block user rows.
+            async with session.begin():
+                reserved_addresses = set((await session.scalars(select(Mailbox.email_address))).all())
+            credentials = await self.mailtm.create_account(reserved_addresses)
+
+            async with session.begin():
+                user = await session.scalar(select(User).where(User.id == user_id).with_for_update())
+                if user is None or user.is_banned:
+                    raise MailTmError("Your account cannot create mailboxes")
+                if user.balance < cost:
+                    raise MailTmError("You do not have enough credits")
+                duplicate = await session.scalar(
+                    select(Mailbox.id).where(func.lower(Mailbox.email_address) == credentials.address.casefold())
+                )
+                if duplicate is not None:
+                    raise MailTmError("Unable to create a unique mailbox")
+                mailbox = Mailbox(
+                    user_id=user_id,
+                    mailtm_account_id=credentials.account_id,
+                    email_address=credentials.address,
+                    mailtm_password_encrypted=self.cipher.encrypt(credentials.password),
+                    mailtm_token_encrypted=self.cipher.encrypt(credentials.token),
+                    status="active",
+                )
+                session.add(mailbox)
                 user.balance -= cost
                 session.add(
                     CreditTransaction(
@@ -92,11 +108,11 @@ class MailboxService:
                         amount=-cost,
                         type="MAIL_CREATION",
                         description="Mail.tm mailbox creation",
-                        reference_id=mailbox.mailtm_account_id,
+                        reference_id=credentials.account_id,
                     )
                 )
                 await session.flush()
-            logger.info("mailbox created user_id=%s mailbox_id=%s", user_id, mailbox.id)
+            logger.info("mailbox created user_id=%s mailbox_id=%s source=remote", user_id, mailbox.id)
             return mailbox
         except Exception:
             if credentials is not None:
@@ -134,8 +150,7 @@ class MailboxService:
                 credentials = None
                 keep_account = False
                 try:
-                    async with self._remote_creation_lock:
-                        credentials = await self.mailtm.create_account(reserved_addresses)
+                    credentials = await self.mailtm.create_account(reserved_addresses)
                     async with self.database.session_factory() as session:
                         async with session.begin():
                             duplicate = await session.scalar(
