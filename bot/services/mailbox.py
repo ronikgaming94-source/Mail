@@ -37,7 +37,7 @@ class MailboxService:
         self.pool_refill_threshold = max(min(pool_refill_threshold, self.pool_target), 0)
         self._pool_refill_lock = asyncio.Lock()
 
-    async def create(self, session: AsyncSession, user_id: int) -> Mailbox:
+    async def create(self, session: AsyncSession, user_id: int) -> tuple[Mailbox, int]:
         cost = int(await self.settings.get(session, "mail_credit_cost") or 1)
         await session.rollback()
         credentials = None
@@ -73,7 +73,7 @@ class MailboxService:
                     )
                     await session.flush()
                     logger.info("mailbox created user_id=%s mailbox_id=%s source=pool", user_id, mailbox.id)
-                    return mailbox
+                    return mailbox, user.balance
 
             # No warm mailbox was available. Create the remote account outside
             # the user transaction so provider latency cannot block user rows.
@@ -113,7 +113,7 @@ class MailboxService:
                 )
                 await session.flush()
             logger.info("mailbox created user_id=%s mailbox_id=%s source=remote", user_id, mailbox.id)
-            return mailbox
+            return mailbox, user.balance
         except Exception:
             if credentials is not None:
                 try:
