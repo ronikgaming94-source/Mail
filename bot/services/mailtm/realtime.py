@@ -65,6 +65,13 @@ class MailEventManager:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
+    async def _sync_mailbox(self, mailbox_id: int, token: str, mailbox_address: str) -> None:
+        summaries = await self.mailtm.list_messages(token, mailbox_address)
+        for summary in reversed(summaries):
+            message_id = event_message_id(summary)
+            if message_id:
+                await self.process_message(mailbox_id, message_id, token, mailbox_address)
+
     async def _listen(self, mailbox_id: int) -> None:
         backoff = 1
         while not self.stopping:
@@ -73,19 +80,23 @@ class MailEventManager:
                     mailbox = await session.get(Mailbox, mailbox_id)
                     if not mailbox or mailbox.status != "active":
                         return
+                    account_id = mailbox.mailtm_account_id
                     token = self.cipher.decrypt(mailbox.mailtm_token_encrypted)
                     mailbox_address = mailbox.email_address
-                summaries = await self.mailtm.list_messages(token, mailbox_address)
-                # Mail.tm's Mercure stream is useful for low-latency delivery,
-                # but it can be interrupted by hosting proxies. Polling the
-                # account API keeps delivery reliable and is deduplicated by
-                # the local message ID constraint.
-                for summary in reversed(summaries):
-                    message_id = event_message_id(summary)
-                    if message_id:
-                        await self.process_message(mailbox_id, message_id, token, mailbox_address)
+
+                # Recover messages that arrived while the process was starting
+                # or while an SSE connection was being re-established.
+                await self._sync_mailbox(mailbox_id, token, mailbox_address)
                 backoff = 1
-                await asyncio.sleep(3)
+
+                # Mercure delivers account-change events immediately. The event
+                # payload is an account resource, so fetch the message list only
+                # when the provider signals that the inbox changed.
+                async for _event in self.mailtm.sse_events(account_id, token, mailbox_address):
+                    await self._sync_mailbox(mailbox_id, token, mailbox_address)
+                    backoff = 1
+
+                raise MailTmError("Mail.tm event stream ended")
             except asyncio.CancelledError:
                 raise
             except MailTmError as exc:
@@ -95,7 +106,7 @@ class MailEventManager:
             except Exception:
                 logger.exception("unexpected mailbox sync error mailbox_id=%s", mailbox_id)
             await asyncio.sleep(backoff)
-            backoff = min(backoff * 2, 60)
+            backoff = min(backoff * 2, 30)
 
     async def _reauthenticate(self, mailbox_id: int) -> None:
         async with self.database.session_factory() as session:
